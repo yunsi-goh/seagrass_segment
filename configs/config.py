@@ -23,7 +23,7 @@ LOG_DIR     = OUTPUT_DIR / "logs"
 
 CROP_SIZE = 512       # training and validation crop size
 TILE_SIZE = CROP_SIZE # inference crop size
-TILE_STRIDE = TILE_SIZE
+TILE_STRIDE = TILE_SIZE // 2  # 50 % overlap → Gaussian blending removes tiling artefacts
 
 # Train / Val / Test split (at the *source image* level, not tile level)
 TRAIN_RATIO = 0.7
@@ -52,8 +52,8 @@ GRAD_ACCUM_STEPS    = 1
 EPOCHS              = 100
 EARLY_STOP_PATIENCE = 20
 LR_ENCODER    = 1e-4
-LR_DECODER    = 1e-3
-LR_DECAY_STEP = 30
+LR_DECODER    = 3e-4
+LR_DECAY_STEP = 20
 LR_DECAY_RATE = 0.5
 SAVE_EVERY    = 50
 NUM_WORKERS   = 4

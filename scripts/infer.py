@@ -50,7 +50,7 @@ def predict_image(
     model: torch.nn.Module,
     img: np.ndarray,              # H×W×3 float32 (already in [0,255])
     tile_size: int = 512,
-    stride: int = 512,
+    stride: int = 256,  # 50 % overlap by default; use Gaussian blending in reconstruct
     normalization: str = cfg.NORMALIZATION,
     threshold: float = 0.5,
     device: torch.device = DEVICE,
@@ -154,8 +154,8 @@ def main():
     parser.add_argument("--output",     type=str,
                         default=str(cfg.PRED_DIR))
     parser.add_argument("--tile_size",  type=int,   default=cfg.TILE_SIZE)
-    parser.add_argument("--stride",     type=int,   default=cfg.TILE_SIZE,
-                        help="Stride for patch-based inference (default=tile_size)")
+    parser.add_argument("--stride",     type=int,   default=cfg.TILE_STRIDE,
+                        help="Stride for patch-based inference (default=tile_size//2 for 50%% overlap)")
     parser.add_argument("--threshold",  type=float, default=cfg.EVAL_THRESHOLD)
     parser.add_argument("--norm",       type=str,   default=cfg.NORMALIZATION)
     parser.add_argument("--save_prob",  action="store_true",

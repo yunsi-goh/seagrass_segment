@@ -15,7 +15,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import json
 import time
+from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
@@ -33,6 +37,93 @@ from utils.metrics import batch_iou
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else
                       "mps"  if torch.backends.mps.is_available() else "cpu")
+
+
+def plot_training_metrics(history, out_path: Path):
+    """Save a compact training dashboard as a PNG."""
+    if not history["epoch"]:
+        return
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.5))
+
+    axes[0].plot(history["epoch"], history["train_loss"], label="train")
+    axes[0].plot(history["epoch"], history["val_loss"],   label="val")
+    axes[0].set_title("Loss")
+    axes[0].set_xlabel("Epoch")
+    axes[0].set_ylabel("Loss")
+    axes[0].grid(alpha=0.3)
+    axes[0].legend()
+
+    axes[1].plot(history["epoch"], history["train_iou"], label="train")
+    axes[1].plot(history["epoch"], history["val_iou"],   label="val")
+    axes[1].set_title("IoU")
+    axes[1].set_xlabel("Epoch")
+    axes[1].set_ylabel("IoU")
+    axes[1].grid(alpha=0.3)
+    axes[1].legend()
+
+    axes[2].plot(history["epoch"], history["lr_encoder"], label="encoder")
+    axes[2].plot(history["epoch"], history["lr_decoder"], label="decoder")
+    axes[2].set_title("Learning Rate")
+    axes[2].set_xlabel("Epoch")
+    axes[2].set_ylabel("LR")
+    axes[2].set_yscale("log")
+    axes[2].grid(alpha=0.3)
+    axes[2].legend()
+
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
+@torch.no_grad()
+def run_test_inference(best_ckpt_path: Path, data_dir: Path, test_stems):
+    """Run inference for held-out test stems and save binary masks."""
+    if not best_ckpt_path.exists():
+        print(f"Skipping test inference: checkpoint not found at {best_ckpt_path}")
+        return
+    if not test_stems:
+        print("Skipping test inference: no test samples from split")
+        return
+
+    from scripts.infer import load_model, load_image, predict_image
+
+    model = load_model(str(best_ckpt_path))
+
+    img_dir = data_dir / "images"
+    pred_dir = cfg.PRED_DIR / "rgb" / "test"
+    pred_dir.mkdir(parents=True, exist_ok=True)
+
+    exts = (".png", ".jpg", ".jpeg", ".tif", ".tiff")
+    saved = 0
+    for stem in test_stems:
+        img_path = None
+        for ext in exts:
+            candidate = img_dir / f"{stem}{ext}"
+            if candidate.exists():
+                img_path = candidate
+                break
+        if img_path is None:
+            print(f"  [SKIP] test image missing for stem '{stem}'")
+            continue
+
+        img = load_image(img_path)
+        _, binary_map = predict_image(
+            model,
+            img,
+            tile_size=cfg.TILE_SIZE,
+            stride=cfg.TILE_STRIDE,
+            normalization=cfg.NORMALIZATION,
+            threshold=cfg.EVAL_THRESHOLD,
+            device=DEVICE,
+        )
+        out_mask = pred_dir / f"{stem}_pred.png"
+        import cv2
+        cv2.imwrite(str(out_mask), binary_map)
+        saved += 1
+
+    print(f"Test inference complete. Saved {saved} mask(s) -> {pred_dir}")
 
 
 def train_epoch(model, loader, criterion, optimizer, device, grad_accum_steps=1):
@@ -71,10 +162,13 @@ def main():
     data_dir = cfg.DATA_DIR / "rgb"
 
     # ── Split ───────────────────────────────────────────────────────────────────
-    train_stems, val_stems, _ = split_source_dir(
+    train_stems, val_stems, test_stems = split_source_dir(
         data_dir, cfg.TRAIN_RATIO, cfg.VAL_RATIO, cfg.RANDOM_SEED
     )
-    print(f"Source images -> train: {len(train_stems)}  val: {len(val_stems)}")
+    print(
+        f"Source images -> train: {len(train_stems)}  "
+        f"val: {len(val_stems)}  test: {len(test_stems)}"
+    )
 
     # ── Datasets ────────────────────────────────────────────────────────────────
     aug = get_train_augmentation(
@@ -110,7 +204,7 @@ def main():
     ).to(DEVICE)
     print(f"Parameters: {count_parameters(model):,}\n")
 
-    criterion = CombinedLoss(dice_w=0.5, bce_w=0.5)
+    criterion = CombinedLoss(dice_w=0.7, bce_w=0.3)  # Dice-heavy reduces boundary sensitivity
 
     optimizer = optim.Adam([
         {"params": model.encoder.parameters(),          "lr": cfg.LR_ENCODER},
@@ -125,8 +219,14 @@ def main():
     cfg.LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = cfg.LOG_DIR / "train_rgb.jsonl"
 
-    best_iou = 0.0
+    best_iou = float("-inf")
     patience_counter = 0
+    history = {
+        "epoch": [],
+        "train_loss": [], "val_loss": [],
+        "train_iou": [],  "val_iou": [],
+        "lr_encoder": [], "lr_decoder": [],
+    }
     print(f"Training for {cfg.EPOCHS} epochs (early stop patience={cfg.EARLY_STOP_PATIENCE}) …\n")
 
     for epoch in range(1, cfg.EPOCHS + 1):
@@ -149,6 +249,14 @@ def main():
                 val_loss=va_loss, val_iou=va_iou,
                 lr_encoder=lr_enc, lr_decoder=lr_dec,
             )) + "\n")
+
+        history["epoch"].append(epoch)
+        history["train_loss"].append(tr_loss)
+        history["val_loss"].append(va_loss)
+        history["train_iou"].append(tr_iou)
+        history["val_iou"].append(va_iou)
+        history["lr_encoder"].append(lr_enc)
+        history["lr_decoder"].append(lr_dec)
 
         if va_iou > best_iou:
             best_iou = va_iou
@@ -179,8 +287,15 @@ def main():
                 "encoder_weights": cfg.ENCODER_WEIGHTS,
             }, ckpt_dir / f"epoch_{epoch:04d}.pth")
 
+    plot_path = cfg.LOG_DIR / "train_rgb_metrics.png"
+    plot_training_metrics(history, plot_path)
+
+    best_ckpt_path = ckpt_dir / "best.pth"
+    run_test_inference(best_ckpt_path, data_dir, test_stems)
+
     print(f"\nTraining complete. Best val IoU: {best_iou:.4f}")
     print(f"Checkpoints → {ckpt_dir}")
+    print(f"Training plot → {plot_path}")
 
 
 if __name__ == "__main__":

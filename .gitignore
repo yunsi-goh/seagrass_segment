@@ -13,3 +13,4 @@ wheels/
 temp/
 data/*/
 *.zip
+outputs/
