@@ -9,13 +9,13 @@ Handles any-size input images by:
 
 Usage:
     # Single image
-    python scripts/infer.py \
+    python scripts/infer_unet.py \
         --checkpoint outputs/checkpoints/rgb/best.pth \
         --input path/to/image.jpg \
         --output outputs/predictions/
 
     # Directory of images
-    python scripts/infer.py \
+    python scripts/infer_unet.py \
         --checkpoint outputs/checkpoints/rgb/best.pth \
         --input path/to/image_dir/ \
         --output outputs/predictions/

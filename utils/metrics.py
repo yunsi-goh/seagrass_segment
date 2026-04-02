@@ -11,7 +11,7 @@ Metrics reported:
 All computed at the pixel level over the full (reconstructed) predicted map.
 """
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 import torch

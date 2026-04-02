@@ -1,7 +1,7 @@
 [project]
 name = "seagrass-segment"
 version = "0.1.0"
-description = "Add your description here"
+description = "Seagrass segmentation pipeline with U-Net and ViT models"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,5 +13,6 @@ dependencies = [
     "segmentation-models-pytorch>=0.5.0",
     "torch>=2.11.0",
     "torchvision>=0.26.0",
+    "timm>=1.0.0",
     "tqdm>=4.67.3",
 ]

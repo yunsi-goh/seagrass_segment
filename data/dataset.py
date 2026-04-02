@@ -207,8 +207,8 @@ class SeagrassDataset(Dataset):
 
 def split_source_dir(
     data_dir: str | Path,
-    train_ratio: float = 0.67,
-    val_ratio: float   = 0.125,
+    train_ratio: float = 0.70,
+    val_ratio: float   = 0.10,
     seed: int = 42,
 ) -> Tuple[List[str], List[str], List[str]]:
     """
