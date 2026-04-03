@@ -205,7 +205,7 @@ def val_epoch_tiled(model, val_stems, data_dir, criterion, device,
         pred_binary = (prob_map >= threshold).astype(np.float32)
         intersection = (pred_binary * gt_binary).sum()
         union        = pred_binary.sum() + gt_binary.sum() - intersection
-        iou          = intersection / (union + 1e-6)
+        iou          = 1.0 if union < 1.0 else float(intersection / union)
 
         total_loss += float(np.mean(tile_losses))
         total_iou  += float(iou)
@@ -296,7 +296,7 @@ def main():
     ).to(DEVICE)
     print(f"Parameters: {count_parameters(model):,}\n")
 
-    criterion = CombinedLoss(dice_w=0.7, bce_w=0.3)  # Dice-heavy reduces boundary sensitivity
+    criterion = CombinedLoss(dice_w=0.5, bce_w=0.5, pos_weight=7.0)  # pos_weight compensates ~7:1 bg:fg ratio
 
     optimizer = optim.Adam([
         {"params": model.encoder.parameters(),          "lr": cfg.LR_ENCODER},

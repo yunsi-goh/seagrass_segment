@@ -30,14 +30,19 @@ class CombinedLoss(nn.Module):
     Dice + BCE loss for sparse foreground segmentation.
     """
 
-    def __init__(self, dice_w: float = 0.5, bce_w: float = 0.5, smooth: float = 1.0):
+    def __init__(self, dice_w: float = 0.5, bce_w: float = 0.5, smooth: float = 1.0,
+                 pos_weight: float | None = None):
         super().__init__()
         self.dice = DiceLoss(smooth)
-        self.bce = nn.BCEWithLogitsLoss()
+        pw = torch.tensor([pos_weight]) if pos_weight is not None else None
+        self.bce = nn.BCEWithLogitsLoss(pos_weight=pw)
         self.dice_w = dice_w
         self.bce_w = bce_w
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # Move pos_weight to the same device as logits if needed
+        if self.bce.pos_weight is not None and self.bce.pos_weight.device != logits.device:
+            self.bce.pos_weight = self.bce.pos_weight.to(logits.device)
         return self.dice_w * self.dice(logits, targets) + self.bce_w * self.bce(logits, targets)
 
 
