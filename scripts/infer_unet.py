@@ -1,25 +1,15 @@
 """
-Inference script for RGB models.
+Inference script for ResNet34 U-Net seagrass segmentation.
 
-Handles any-size input images by:
-  1. Running patch-based inference on fixed-size windows
-  2. Applying the trained U-Net to each window
-  3. Reconstructing the full prediction map
-  4. Saving as a binary PNG mask
+Handles any image size via patch-based tiling with Gaussian blending.
 
 Usage:
-    # Single image
-    python scripts/infer_unet.py \
-        --checkpoint outputs/checkpoints/rgb/best.pth \
-        --input path/to/image.jpg \
+    python scripts/infer_unet.py \\
+        --checkpoint outputs/unet__bs18__lrdec0.0003/checkpoints/best.pth \\
+        --input path/to/image.jpg \\
         --output outputs/predictions/
 
-    # Directory of images
-    python scripts/infer_unet.py \
-        --checkpoint outputs/checkpoints/rgb/best.pth \
-        --input path/to/image_dir/ \
-        --output outputs/predictions/
-
+    --save_prob  : also save float32 probability map as .npy
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,7 +23,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from configs import config as cfg
+from configs import config_unet as cfg
 from models.unet import build_unet
 from utils.normalization import normalize_np
 from utils.tiling import reconstruct_from_tiles
@@ -43,25 +33,19 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else
                       "cpu")
 
 
-# ── Patch-based inference for one large image ──────────────────────────────────
+# ── Patch-based inference ─────────────────────────────────────────────────────────
 
 @torch.no_grad()
 def predict_image(
     model: torch.nn.Module,
-    img: np.ndarray,              # H×W×3 float32 (already in [0,255])
+    img: np.ndarray,
     tile_size: int = 512,
-    stride: int = 256,  # 50 % overlap by default; use Gaussian blending in reconstruct
+    stride: int = 256,
     normalization: str = cfg.NORMALIZATION,
     threshold: float = 0.5,
     device: torch.device = DEVICE,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Run inference on a full image with patch-based prediction.
-
-    Returns:
-        prob_map:   H×W float32  probability map (0–1)
-        binary_map: H×W uint8   binary mask      (0 or 255)
-    """
+    """Tiled patch inference on a full image. Returns (prob_map, binary_map)."""
     model.eval()
     H, W = img.shape[:2]
 
@@ -70,11 +54,10 @@ def predict_image(
 
     for y in range(0, H, stride):
         for x in range(0, W, stride):
-            # Crop tile (may be smaller near edges — pad to tile_size)
             tile = img[y:y+tile_size, x:x+tile_size]
             th, tw = tile.shape[:2]
 
-            # Pad to full tile_size if needed
+            # pad to tile_size near edges
             pad_h = tile_size - th
             pad_w = tile_size - tw
             if pad_h > 0 or pad_w > 0:
@@ -83,18 +66,12 @@ def predict_image(
                 else:
                     tile = np.pad(tile, ((0, pad_h), (0, pad_w), (0, 0)))
 
-            # Normalise
-            tile_norm = normalize_np(tile, method=normalization)  # H×W×C float32
+            tile_norm = normalize_np(tile, method=normalization)
+            tensor = torch.from_numpy(tile_norm.transpose(2, 0, 1)).unsqueeze(0).to(device)
 
-            # To tensor: C×H×W
-            tensor = torch.from_numpy(tile_norm.transpose(2, 0, 1)).unsqueeze(0)
-            tensor = tensor.to(device)
-
-            logit = model(tensor)                       # 1×1×H×W
-            prob  = torch.sigmoid(logit).squeeze().cpu().numpy()  # H×W
-
-            # Unpad
-            prob = prob[:th, :tw]
+            logit = model(tensor)
+            prob  = torch.sigmoid(logit).squeeze().cpu().numpy()
+            prob  = prob[:th, :tw]  # unpad
 
             tile_preds .append(prob)
             tile_coords.append((y, x))
@@ -117,8 +94,7 @@ def load_model(checkpoint_path: str) -> torch.nn.Module:
         in_channels=in_channels,
         out_channels=out_channels,
         encoder_name=encoder_name,
-        # Checkpoints already contain encoder weights, so don't require a
-        # fresh ImageNet download just to rebuild the module skeleton.
+        # Checkpoints already contain encoder weights.
         encoder_weights=None,
     )
 
@@ -167,7 +143,6 @@ def main():
 
     model = load_model(args.checkpoint)
 
-    # Collect inputs
     input_path = Path(args.input)
     if input_path.is_dir():
         img_paths = sorted(

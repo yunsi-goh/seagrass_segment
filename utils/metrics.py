@@ -1,14 +1,6 @@
 """
-Evaluation metrics — exactly as defined in Jeon et al. (2021) Eqs. (3)–(7).
-
-Metrics reported:
-  - Pixel Accuracy  Eq.(3): (TP + TN) / (TP + TN + FP + FN)
-  - Precision       Eq.(4): TP / (TP + FP)
-  - Recall          Eq.(5): TP / (TP + FN)
-  - F1 / Dice       Eq.(6): 2TP / (2TP + FP + FN)
-  - IoU             Eq.(7): TP / (TP + FP + FN)
-
-All computed at the pixel level over the full (reconstructed) predicted map.
+Segmentation metrics: pixel accuracy, precision, recall, F1, IoU.
+Jeon et al. (2021) Ecological Informatics 66, 101430. Eqs. (3)–(7).
 """
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List
@@ -17,7 +9,7 @@ import numpy as np
 import torch
 
 
-# ── Dataclass to hold per-image results ────────────────────────────────────────
+# ── Per-image metrics ────────────────────────────────────────────────────────────────
 
 @dataclass
 class SegMetrics:
@@ -45,17 +37,7 @@ def compute_metrics(
     gt_mask: np.ndarray,
     threshold: float = 0.5,
 ) -> SegMetrics:
-    """
-    Compute segmentation metrics for a single image.
-
-    Args:
-        pred_mask: H×W float32 probability map  OR  binary uint8 {0,1} map.
-        gt_mask:   H×W binary uint8 {0,1} ground-truth.
-        threshold: Binarisation threshold (paper uses 0.5).
-
-    Returns:
-        SegMetrics dataclass.
-    """
+    """Compute pixel-level metrics for one image."""
     if pred_mask.dtype != np.uint8:
         pred_binary = (pred_mask >= threshold).astype(np.uint8)
     else:
@@ -84,22 +66,14 @@ def compute_metrics(
     )
 
 
-# ── Batch-level (for training loop) ────────────────────────────────────────────
+# ── Batch IoU (training loop) ───────────────────────────────────────────────────────
 
 def batch_iou(
     logits: torch.Tensor,
     targets: torch.Tensor,
     threshold: float = 0.5,
 ) -> torch.Tensor:
-    """
-    Fast IoU over a batch during training (no numpy, stays on GPU).
-
-    Args:
-        logits:  B×1×H×W raw logits.
-        targets: B×1×H×W float binary.
-    Returns:
-        Scalar IoU tensor.
-    """
+    """Fast scalar IoU over a batch (stays on GPU)."""
     preds = (torch.sigmoid(logits) >= threshold).float()
     tp = (preds * targets).sum(dim=(1, 2, 3))
     fp = (preds * (1 - targets)).sum(dim=(1, 2, 3))
@@ -108,7 +82,7 @@ def batch_iou(
     return iou.mean()
 
 
-# ── Aggregate results over a test set ─────────────────────────────────────────
+# ── Aggregate results ────────────────────────────────────────────────────────────────
 
 @dataclass
 class AggregateResults:

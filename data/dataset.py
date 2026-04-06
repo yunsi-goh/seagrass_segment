@@ -1,9 +1,7 @@
 """
 PyTorch Dataset for seagrass segmentation.
 
-Training samples directly from source images under data/rgb instead of a
-precomputed tile cache. Augmentation is applied online to produce fixed-size
-training samples.
+Loads source RGB image-mask pairs from data/rgb/ with online augmentation.
 """
 import random
 from pathlib import Path
@@ -36,14 +34,9 @@ def get_train_augmentation(
     hue_p: float = 0.2,
     blur_p: float = 0.2,
 ) -> "A.Compose":
-    """
-    Training augmentation pipeline.
-
-    Spatial transforms → applied identically to image AND mask.
-    Colour transforms  → image only (albumentations handles this automatically).
-    """
+    """Training augmentation pipeline (spatial + colour)."""
     return A.Compose([
-        # ── Spatial ──────────────────────────────────────────────────────────
+
         A.RandomScale(
             scale_limit=(rescale_min - 1.0, rescale_max - 1.0),
             interpolation=cv2.INTER_LINEAR,
@@ -105,16 +98,7 @@ class SeagrassDataset(Dataset):
     """
     Loads source RGB image-mask pairs.
 
-    Directory layout:
-        data_dir/
-            images/   *.jpg / *.png / *.tif   (3-ch RGB)
-            masks/    *.png                    (binary: 0=background, 255=seagrass)
-
-    Args:
-        data_dir:      Root dataset directory.
-        normalization: "imagenet" | "minmax" | "zscore" | "none"
-        augmentation:  albumentations Compose, or None.
-        sample_stems:  optional iterable of source-image stems to include.
+    Layout: data_dir/images/*.{jpg,png,tif}  +  data_dir/masks/*.png
     """
 
     def __init__(
@@ -156,7 +140,7 @@ class SeagrassDataset(Dataset):
     # ── Loaders ───────────────────────────────────────────────────────────────
 
     def _load_image(self, path: Path) -> np.ndarray:
-        """Return H×W×3 float32 in original [0,255] range."""
+        """Return H×W×3 float32 in [0, 255]."""
         img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
         if img is None:
             raise IOError(f"Cannot read {path}")
@@ -166,7 +150,7 @@ class SeagrassDataset(Dataset):
         return img.astype(np.float32)
 
     def _load_mask(self, path: Path) -> np.ndarray:
-        """Return H×W uint8 {0,1}."""
+        """Return H×W uint8 binary mask {0, 1}."""
         mask = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
         if mask is None:
             raise IOError(f"Cannot read {path}")
@@ -183,19 +167,16 @@ class SeagrassDataset(Dataset):
         img  = self._load_image(img_path)     # H×W×C float32
         mask = self._load_mask(mask_path)     # H×W uint8 {0,1}
 
-        # ── Augmentation ──────────────────────────────────────────────────────
         if self.augmentation is not None:
             img_uint8 = np.clip(img, 0, 255).astype(np.uint8)
             augmented = self.augmentation(image=img_uint8, mask=mask)
             img       = augmented["image"].astype(np.float32)
             mask      = augmented["mask"]
 
-        # ── Normalisation ─────────────────────────────────────────────────────
-        img = normalize_np(img, method=self.norm_method)       # → float32 [0,1]
+        img = normalize_np(img, method=self.norm_method)
 
-        # ── To tensor ─────────────────────────────────────────────────────────
-        img_t  = torch.from_numpy(img.transpose(2, 0, 1))      # C×H×W float32
-        mask_t = torch.from_numpy(mask).unsqueeze(0).float()   # 1×H×W float32
+        img_t  = torch.from_numpy(img.transpose(2, 0, 1))
+        mask_t = torch.from_numpy(mask).unsqueeze(0).float()
         return img_t, mask_t
 
     def __repr__(self) -> str:

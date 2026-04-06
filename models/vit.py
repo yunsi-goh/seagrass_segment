@@ -1,8 +1,8 @@
 """
 ViT-B/16 segmentation model for seagrass detection.
 
-Based on SeagrassFinder (Elsässer et al., 2024/2025, Ecological Informatics).
-Architecture: ViT-B/16 encoder + lightweight MLP decode head (SegFormer-inspired).
+ViT-B/16 encoder + lightweight MLP decode head.
+Reference: SeagrassFinder (Elsässer et al., 2024/2025, Ecological Informatics).
 """
 
 import torch
@@ -10,24 +10,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
 
-# ---------------------------------------------------------------------------
-# Losses (re-exported so train_unet.py only needs to import from one place)
-# ---------------------------------------------------------------------------
+# ── Losses (re-exported for consistent imports) ───────────────────────────────
 from models.unet import CombinedLoss, DiceLoss  # noqa: F401
 
 
-# ---------------------------------------------------------------------------
-# Option A: ViT-B/16 encoder + MLP decode head
-# ---------------------------------------------------------------------------
+# ── Model ─────────────────────────────────────────────────────────────────────
 
 class ViTEncoder(nn.Module):
-    """
-    Wraps timm's ViT-B/16 pretrained on ImageNet-21k (or ImageNet-1k) and
-    exposes intermediate patch tokens as spatial feature maps for decoding.
-
-    The ViT does not produce multi-scale features natively, so we take the
-    final sequence of patch tokens and reshape them into a 2-D feature map.
-    """
+    """ViT-B/16 encoder that reshapes patch tokens into a spatial feature map."""
 
     def __init__(
         self,
@@ -58,27 +48,15 @@ class ViTEncoder(nn.Module):
         self.grid_size  = img_size // patch_size   # e.g. 512//16 = 32
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        x: B×3×H×W
-        Returns: B×C×h×w  spatial feature map (h = w = H/patch_size)
-        """
-        # forward_features returns (B, N+1, C) where N = num_patches, +1 = cls
         tokens = self.vit.forward_features(x)  # (B, N+1, C)
-        patch_tokens = tokens[:, 1:, :]        # drop [CLS], (B, N, C)
+        patch_tokens = tokens[:, 1:, :]        # drop [CLS]
         B, N, C = patch_tokens.shape
         h = w = int(N ** 0.5)
-        # reshape to spatial map
-        feat = patch_tokens.permute(0, 2, 1).view(B, C, h, w)  # B×C×h×w
-        return feat
+        return patch_tokens.permute(0, 2, 1).view(B, C, h, w)
 
 
 class MLPDecodeHead(nn.Module):
-    """
-    Simple MLP + bilinear upsample decode head for ViT features.
-    Progressively doubles resolution until reaching the input size.
-
-    decode_channels controls intermediate feature width.
-    """
+    """MLP + bilinear upsample decode head for ViT patch-level features."""
 
     def __init__(
         self,
@@ -108,12 +86,7 @@ class MLPDecodeHead(nn.Module):
         self.head = nn.Conv2d(decode_channels // 2, out_channels, kernel_size=1)
 
     def forward(self, feat: torch.Tensor, target_size: Optional[tuple] = None) -> torch.Tensor:
-        """
-        feat: B×C×h×w  (patch-level feature map)
-        Returns: B×out_channels×H×W logits
-        """
         x = self.proj(feat)
-        # Upsample to full image resolution
         if target_size is not None:
             x = F.interpolate(x, size=target_size, mode="bilinear", align_corners=False)
         else:
@@ -124,10 +97,7 @@ class MLPDecodeHead(nn.Module):
 
 
 class ViTSegNet(nn.Module):
-    """
-    Full segmentation network: ViT encoder + MLP decode head.
-    Drop-in replacement for the smp U-Net returned by build_unet().
-    """
+    """ViT encoder + MLP decode head segmentation network."""
 
     def __init__(
         self,
@@ -161,9 +131,7 @@ class ViTSegNet(nn.Module):
         return logits
 
 
-# ---------------------------------------------------------------------------
-# Factory + helpers
-# ---------------------------------------------------------------------------
+# ── Factory + helpers ─────────────────────────────────────────────────────────
 
 def build_vit_seg(
     in_channels: int = 3,
@@ -173,10 +141,7 @@ def build_vit_seg(
     pretrained: bool = True,
     decode_channels: int = 256,
 ) -> nn.Module:
-    """
-    Primary factory function — returns a ViTSegNet.
-    Used by scripts/train_vit.py and scripts/infer_vit.py.
-    """
+    """Build a ViTSegNet."""
     return ViTSegNet(
         model_name=model_name,
         pretrained=pretrained,

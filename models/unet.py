@@ -9,9 +9,7 @@ import torch.nn as nn
 
 
 class DiceLoss(nn.Module):
-    """
-    Soft Dice loss operating on raw logits.
-    """
+    """Soft Dice loss operating on raw logits."""
 
     def __init__(self, smooth: float = 1.0):
         super().__init__()
@@ -26,9 +24,7 @@ class DiceLoss(nn.Module):
 
 
 class CombinedLoss(nn.Module):
-    """
-    Dice + BCE loss for sparse foreground segmentation.
-    """
+    """Dice + BCE loss for sparse foreground segmentation."""
 
     def __init__(self, dice_w: float = 0.5, bce_w: float = 0.5, smooth: float = 1.0,
                  pos_weight: float | None = None):
@@ -52,9 +48,7 @@ def build_unet(
     encoder_name: str = "resnet34",
     encoder_weights: str | None = "imagenet",
 ) -> nn.Module:
-    """
-    Build a segmentation-models-pytorch U-Net with a ResNet encoder.
-    """
+    """Build a segmentation-models-pytorch U-Net with a ResNet encoder."""
     try:
         import segmentation_models_pytorch as smp
     except ImportError as e:

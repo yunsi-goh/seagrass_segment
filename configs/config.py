@@ -1,8 +1,5 @@
 """
-Central configuration for the seagrass U-Net pipeline.
-Based on: Jeon et al. (2021) Ecological Informatics 66, 101430
-Default pipeline: ImageNet-initialized ResNet34 U-Net with source-image
-training and online augmentation.
+Shared pipeline configuration (paths, training defaults, augmentation).
 """
 from pathlib import Path
 
@@ -14,50 +11,30 @@ CKPT_DIR    = OUTPUT_DIR / "checkpoints"
 PRED_DIR    = OUTPUT_DIR / "predictions"
 LOG_DIR     = OUTPUT_DIR / "logs"
 
-# ── Dataset ────────────────────────────────────────────────────────────────────
-# Expected layout:
-#   data/
-#     rgb/
-#       images/      *.jpg / *.png / *.tif  (RGB source images)
-#       masks/       *.png                  (binary, same stem)
-
-CROP_SIZE = 512       # training and validation crop size
-TILE_SIZE = CROP_SIZE # inference crop size
-TILE_STRIDE = TILE_SIZE // 2  # 50 % overlap → Gaussian blending removes tiling artefacts
-
-# Train / Val / Test split (at the *source image* level, not tile level)
+# ── Dataset split ──────────────────────────────────────────────────────────────
+# train/val/test split at source-image level
 TRAIN_RATIO = 0.7
 VAL_RATIO   = 0.1
 TEST_RATIO  = 0.2
 RANDOM_SEED = 42
 
-# ── Input channels ─────────────────────────────────────────────────────────────
-IN_CHANNELS = 3
+# ── Network I/O ────────────────────────────────────────────────────────────────
+IN_CHANNELS  = 3
+OUT_CHANNELS = 1
 
 # ── Normalization ──────────────────────────────────────────────────────────────
-# "imagenet" : ImageNet mean/std — required when using a pretrained encoder
-# "minmax"   : per-image min-max (paper default, for training from scratch)
-# "zscore"   : per-image z-score
-# "none"     : scale to [0,1] only
+# "imagenet" | "minmax" | "zscore" | "none"
 NORMALIZATION = "imagenet"
 
-# ── Model ──────────────────────────────────────────────────────────────────────
-OUT_CHANNELS = 1
-ENCODER_NAME = "resnet34"
-ENCODER_WEIGHTS = "imagenet"
-
-# ── Training ───────────────────────────────────────────────────────────────────
-BATCH_SIZE          = 18
-GRAD_ACCUM_STEPS    = 1
+# ── Training (shared defaults) ─────────────────────────────────────────────────
 EPOCHS              = 100
 EARLY_STOP_PATIENCE = 20
-LR_ENCODER    = 1e-4
-LR_DECODER    = 3e-4
-LR_DECAY_STEP = 20
-LR_DECAY_RATE = 0.5
-SAVE_EVERY    = 50
-NUM_WORKERS   = 4
-PIN_MEMORY    = True
+GRAD_ACCUM_STEPS    = 1
+SAVE_EVERY          = 50
+NUM_WORKERS         = 4
+PIN_MEMORY          = True
+LR_DECAY_STEP       = 20
+LR_DECAY_RATE       = 0.5
 
 # ── Evaluation ─────────────────────────────────────────────────────────────────
 EVAL_THRESHOLD = 0.5

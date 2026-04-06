@@ -8,11 +8,17 @@ Usage:
     # Train U-Net / ResNet34 model
     python main.py train --model unet
 
+    # Train SAM2-UNet model (Hiera backbone)
+    python main.py train --model sam2unet
+
     # Run inference with ViT (default)
     python main.py infer --checkpoint outputs/vit__bs4__lrdec0.0003/checkpoints/best.pth --input path/to/img.jpg
 
     # Run inference with UNet
     python main.py infer --model unet --checkpoint outputs/unet__bs18__lrdec0.0003/checkpoints/best.pth --input path/to/img.jpg
+
+    # Run inference with SAM2-UNet
+    python main.py infer --model sam2unet --checkpoint outputs/sam2unet__tiny__bs4__lr0.0003/checkpoints/best.pth --input path/to/img.jpg
 
     # Evaluate predictions
     python main.py evaluate --pred_dir outputs/predictions/ --gt_dir data/rgb/masks/
@@ -33,11 +39,12 @@ def main():
     )
     parser.add_argument(
         "--model",
-        choices=["unet", "vit"],
+        choices=["unet", "vit", "sam2unet"],
         default="vit",
         help=(
             "'vit' = ViT-B/16 encoder (SeagrassFinder best model, default). "
-            "'unet' = ResNet34 U-Net (original pipeline)."
+            "'unet' = ResNet34 U-Net (original pipeline). "
+            "'sam2unet' = SAM2-UNet with Hiera backbone (Huang 2025)."
         ),
     )
     args, remaining = parser.parse_known_args()
@@ -46,12 +53,16 @@ def main():
     if args.command == "train":
         if args.model == "vit":
             from scripts.train_vit import main as run
+        elif args.model == "sam2unet":
+            from scripts.train_sam2unet import main as run
         else:
             from scripts.train_unet import main as run
         run()
     elif args.command == "infer":
         if args.model == "vit":
             from scripts.infer_vit import main as run
+        elif args.model == "sam2unet":
+            from scripts.infer_sam2unet import main as run
         else:
             from scripts.infer_unet import main as run
         run()

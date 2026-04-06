@@ -1,12 +1,18 @@
 """
-Inference script for ViT-B/16 seagrass segmentation.
+Inference script for SAM2-UNet seagrass segmentation.
 
 Handles any image size via patch-based tiling with Gaussian blending.
 
 Usage:
-    python scripts/infer_vit.py \\
-        --checkpoint outputs/vit__bs4__lrdec0.0003/checkpoints/best.pth \\
+    python scripts/infer_sam2unet.py \\
+        --checkpoint outputs/sam2unet__tiny__bs4__lr0.0003/checkpoints/best.pth \\
         --input path/to/image.jpg \\
+        --output outputs/predictions/
+
+    # directory of images
+    python scripts/infer_sam2unet.py \\
+        --checkpoint outputs/sam2unet__tiny__bs4__lr0.0003/checkpoints/best.pth \\
+        --input path/to/image_dir/ \\
         --output outputs/predictions/
 
     --save_prob  : also save float32 probability map as .npy
@@ -24,8 +30,8 @@ import torch
 from tqdm import tqdm
 
 from configs import config as cfg
-from configs import config_vit as vcfg
-from models.vit import build_vit_seg
+from configs import config_sam2unet as scfg
+from models.sam2unet import build_sam2unet
 from utils.normalization import normalize_np
 from utils.tiling import reconstruct_from_tiles
 
@@ -38,28 +44,26 @@ DEVICE = torch.device(
 # ── Patch-based inference ─────────────────────────────────────────────────────
 
 @torch.no_grad()
-def predict_image_vit(
+def predict_image_sam2unet(
     model: torch.nn.Module,
     img: np.ndarray,
-    tile_size: int = 512,
-    stride: int = 256,
-    normalization: str = cfg.NORMALIZATION,
+    tile_size: int = 352,
+    stride: int = 176,
+    normalization: str = "imagenet",
     threshold: float = 0.5,
     device: torch.device = DEVICE,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Tiled patch inference on a full image. Returns (prob_map, binary_map)."""
     model.eval()
     H, W = img.shape[:2]
-
-    tile_preds:  List[np.ndarray]       = []
-    tile_coords: List[Tuple[int, int]]  = []
+    tile_preds:  List[np.ndarray]      = []
+    tile_coords: List[Tuple[int, int]] = []
 
     for y in range(0, H, stride):
         for x in range(0, W, stride):
             tile = img[y:y + tile_size, x:x + tile_size]
             th, tw = tile.shape[:2]
 
-            # Pad to tile_size
             pad_h = tile_size - th
             pad_w = tile_size - tw
             if pad_h > 0 or pad_w > 0:
@@ -70,11 +74,10 @@ def predict_image_vit(
                 tile_norm.transpose(2, 0, 1)
             ).unsqueeze(0).to(device)
 
-            logit = model(tensor)
+            logit = model(tensor)          # eval → 1×1×H×W  (finest prediction)
             prob  = torch.sigmoid(logit).squeeze().cpu().numpy()
 
-            prob = prob[:th, :tw]   # unpad
-            tile_preds.append(prob)
+            tile_preds.append(prob[:th, :tw])
             tile_coords.append((y, x))
 
     prob_map   = reconstruct_from_tiles(tile_preds, tile_coords, (H, W), tile_size)
@@ -82,24 +85,23 @@ def predict_image_vit(
     return prob_map, binary_map
 
 
-# ── Load model from checkpoint ────────────────────────────────────────────────
+# ── Load model ────────────────────────────────────────────────────────────────
 
-def load_vit_model(checkpoint_path: str) -> torch.nn.Module:
+def load_sam2unet_model(checkpoint_path: str) -> torch.nn.Module:
     ckpt = torch.load(checkpoint_path, map_location="cpu")
 
-    vit_model_name  = ckpt.get("vit_model_name",  vcfg.VIT_MODEL_NAME)
-    img_size        = ckpt.get("img_size",         vcfg.CROP_SIZE)
-    decode_channels = ckpt.get("decode_channels",  vcfg.DECODE_CHANNELS)
-    in_channels     = ckpt.get("in_channels",      cfg.IN_CHANNELS)
-    out_channels    = ckpt.get("out_channels",      cfg.OUT_CHANNELS)
+    model_size    = ckpt.get("model_size",    scfg.SAM2_MODEL_SIZE)
+    rfb_channels  = ckpt.get("rfb_channels",  scfg.RFB_CHANNELS)
+    adapter_ratio = ckpt.get("adapter_ratio", scfg.ADAPTER_RATIO)
+    img_size      = ckpt.get("crop_size",     scfg.CROP_SIZE)
 
-    model = build_vit_seg(
-        in_channels=in_channels,
-        out_channels=out_channels,
+    model = build_sam2unet(
+        model_size=model_size,
+        pretrained_path=None,         # weights come from checkpoint
+        rfb_channels=rfb_channels,
+        adapter_ratio=adapter_ratio,
+        freeze_backbone=False,        # no freezing during inference
         img_size=img_size,
-        model_name=vit_model_name,
-        pretrained=False,       # weights come from checkpoint
-        decode_channels=decode_channels,
     )
 
     state = ckpt.get("model_state_dict", ckpt)
@@ -107,13 +109,13 @@ def load_vit_model(checkpoint_path: str) -> torch.nn.Module:
     model = model.to(DEVICE)
     model.eval()
     print(
-        f"ViT model loaded from {checkpoint_path}  "
-        f"(encoder={vit_model_name}, img_size={img_size})"
+        f"SAM2UNet loaded from {checkpoint_path}  "
+        f"(backbone=Hiera-{model_size}, rfb_ch={rfb_channels})"
     )
     return model
 
 
-# ── Load image ────────────────────────────────────────────────────────────────
+# ── Image loader ──────────────────────────────────────────────────────────────
 
 def load_image(img_path: Path) -> np.ndarray:
     img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
@@ -125,13 +127,14 @@ def load_image(img_path: Path) -> np.ndarray:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Run ViT seagrass inference")
+    parser = argparse.ArgumentParser(description="Run SAM2-UNet seagrass inference")
     parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--input",      type=str, required=True,
                         help="Image file or directory")
-    parser.add_argument("--output",     type=str, default=str(cfg.PRED_DIR / "vit"))
-    parser.add_argument("--tile_size",  type=int, default=vcfg.CROP_SIZE)
-    parser.add_argument("--stride",     type=int, default=vcfg.TILE_STRIDE)
+    parser.add_argument("--output",     type=str,
+                        default=str(cfg.PRED_DIR / "sam2unet"))
+    parser.add_argument("--tile_size",  type=int, default=scfg.CROP_SIZE)
+    parser.add_argument("--stride",     type=int, default=scfg.TILE_STRIDE)
     parser.add_argument("--threshold",  type=float, default=cfg.EVAL_THRESHOLD)
     parser.add_argument("--norm",       type=str, default=cfg.NORMALIZATION)
     parser.add_argument("--save_prob",  action="store_true",
@@ -141,7 +144,7 @@ def main():
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    model = load_vit_model(args.checkpoint)
+    model = load_sam2unet_model(args.checkpoint)
 
     input_path = Path(args.input)
     if input_path.is_dir():
@@ -154,16 +157,14 @@ def main():
     else:
         img_paths = [input_path]
 
-    print(f"\nRunning ViT inference on {len(img_paths)} image(s) …")
+    print(f"\nRunning SAM2UNet inference on {len(img_paths)} image(s) …")
 
     for img_path in tqdm(img_paths, desc="Predicting"):
         img = load_image(img_path)
-        prob_map, binary_map = predict_image_vit(
+        prob_map, binary_map = predict_image_sam2unet(
             model, img,
-            tile_size=args.tile_size,
-            stride=args.stride,
-            normalization=args.norm,
-            threshold=args.threshold,
+            tile_size=args.tile_size, stride=args.stride,
+            normalization=args.norm,  threshold=args.threshold,
             device=DEVICE,
         )
         cv2.imwrite(str(output_dir / f"{img_path.stem}_pred.png"), binary_map)
@@ -175,4 +176,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

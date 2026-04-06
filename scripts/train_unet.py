@@ -1,9 +1,9 @@
 """
 Training script for ResNet34 U-Net seagrass segmentation.
 
-Trains on source images with online augmentation using differential
-encoder/decoder learning rates, CombinedLoss, early stopping, and
-per-run output directories.
+Usage:
+    python scripts/train_unet.py
+    python main.py train --model unet
 
 Outputs: outputs/unet__bs<N>__lrdec<LR>/
 """
@@ -24,7 +24,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
 
-from configs import config as cfg
+from configs import config_unet as cfg
 from data.dataset import (
     SeagrassDataset,
     get_train_augmentation,

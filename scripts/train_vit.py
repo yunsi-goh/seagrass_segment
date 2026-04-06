@@ -1,9 +1,11 @@
 """
-Training script for ViT-B/16 seagrass segmentation (SeagrassFinder).
+Training script for ViT-B/16 seagrass segmentation.
 
-Reference:
-  Elsässer et al. (2024/2025) "SeagrassFinder: Deep Learning for Eelgrass
-  Detection and Coverage Estimation in the Wild." Ecological Informatics.
+Elsässer et al. (2024/2025) SeagrassFinder. Ecological Informatics.
+
+Usage:
+    python scripts/train_vit.py
+    python main.py train
 
 Outputs: outputs/vit__bs<N>__lrdec<LR>/
 """
@@ -42,7 +44,7 @@ DEVICE = torch.device(
 )
 
 
-# ── Plotting (same as train_unet.py) ───────────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────────────────
 
 def plot_training_metrics(history, out_path: Path):
     if not history["epoch"]:

@@ -1,29 +1,19 @@
 """
 Evaluation script for seagrass segmentation.
 
-Computes per-image and aggregate:
-  Pixel Accuracy, Precision, Recall, F1, IoU
+Computes per-image and aggregate pixel accuracy, precision, recall, F1, IoU.
 
 Usage:
-    # Evaluate existing predictions against ground truth
-    python scripts/evaluate.py \
-        --pred_dir outputs/predictions/ \
+    # Evaluate pre-existing predictions
+    python scripts/evaluate.py \\
+        --pred_dir outputs/predictions/ \\
         --gt_dir data/rgb/masks/
 
-    # Run inference then evaluate (U-Net)
-    python scripts/evaluate.py \
-        --run_inference \
-        --model unet \
-        --checkpoint outputs/checkpoints/rgb/best.pth \
-        --image_dir path/to/images \
-        --gt_dir path/to/masks
-
-    # Run inference then evaluate (ViT)
-    python scripts/evaluate.py \
-        --run_inference \
-        --model vit \
-        --checkpoint outputs/checkpoints/vit/best.pth \
-        --image_dir path/to/images \
+    # Run inference then evaluate
+    python scripts/evaluate.py \\
+        --run_inference --model unet \\
+        --checkpoint outputs/.../best.pth \\
+        --image_dir path/to/images \\
         --gt_dir path/to/masks
 """
 import sys, os
@@ -92,7 +82,7 @@ def main():
     parser.add_argument("--run_inference", action="store_true")
     parser.add_argument(
         "--model",
-        choices=["unet", "vit"],
+        choices=["unet", "vit", "sam2unet"],
         default="unet",
         help="Model used when --run_inference is set.",
     )
@@ -136,10 +126,20 @@ def main():
             from scripts.infer_vit import load_image, predict_image_vit as predict_image
             tile_size = vcfg.CROP_SIZE
             stride = vcfg.TILE_STRIDE
+        elif args.model == "sam2unet":
+            from configs import config_sam2unet as scfg
+            from scripts.infer_sam2unet import (
+                load_sam2unet_model as load_model,
+                load_image,
+                predict_image_sam2unet as predict_image,
+            )
+            tile_size = scfg.CROP_SIZE
+            stride = scfg.TILE_STRIDE
         else:
+            from configs import config_unet as ucfg
             from scripts.infer_unet import load_model, load_image, predict_image
-            tile_size = cfg.TILE_SIZE
-            stride = cfg.TILE_STRIDE
+            tile_size = ucfg.TILE_SIZE
+            stride = ucfg.TILE_STRIDE
 
         model = load_model(args.checkpoint)
 
