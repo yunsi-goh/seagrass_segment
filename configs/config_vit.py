@@ -13,7 +13,7 @@ DECODE_CHANNELS = 256
 
 # ── Freeze warmup ──────────────────────────────────────────────────────────────
 # epochs to train decoder-only before unfreezing the ViT encoder; 0 = disable
-VIT_FREEZE_EPOCHS = 5
+VIT_FREEZE_EPOCHS = 10  # was 5; longer warmup reduces encoder destabilisation
 
 # ── Image / tile size ─────────────────────────────────────────────────────────
 # must be a multiple of 16 (ViT patch size)
@@ -24,7 +24,10 @@ TILE_STRIDE = CROP_SIZE // 2   # 50% overlap
 # encoder LR much lower to avoid catastrophic forgetting
 LR_ENCODER   = 1e-5
 LR_DECODER   = 3e-4
-WEIGHT_DECAY = 1e-4
+WEIGHT_DECAY = 5e-4  # was 1e-4; stronger regularisation to reduce overfitting
+
+# ── Scheduler ──────────────────────────────────────────────────────────
+USE_COSINE_LR = True  # smoother than StepLR
 
 # ── Batch size ────────────────────────────────────────────────────────────────
 

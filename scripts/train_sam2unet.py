@@ -67,6 +67,21 @@ def plot_training_metrics(history: dict, out_path: Path):
     plt.close(fig)
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _make_param_groups(model, backbone_lr: float, head_lr: float) -> list:
+    """Split parameters into backbone vs head groups for differential LRs."""
+    bb_ids = {id(p) for p in model.encoder.backbone.parameters()}
+    backbone_p = [p for p in model.parameters() if id(p) in bb_ids and p.requires_grad]
+    head_p     = [p for p in model.parameters() if id(p) not in bb_ids and p.requires_grad]
+    groups = []
+    if backbone_p:
+        groups.append({"params": backbone_p, "lr": backbone_lr})
+    if head_p:
+        groups.append({"params": head_p, "lr": head_lr})
+    return groups
+
+
 # ── Train / Val ───────────────────────────────────────────────────────────────
 
 def train_epoch(model, loader, criterion, optimizer, device, grad_accum_steps=1):
@@ -89,6 +104,7 @@ def train_epoch(model, loader, criterion, optimizer, device, grad_accum_steps=1)
         iou_sum += batch_iou(outputs[-1].detach(), masks).item()
 
         if (step + 1) % grad_accum_steps == 0 or (step + 1) == len(loader):
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             optimizer.zero_grad()
 
@@ -291,15 +307,12 @@ def main():
         if scfg.FREEZE_EPOCHS > 0 and epoch == scfg.FREEZE_EPOCHS + 1:
             print(f"\nUnfreezing Hiera backbone at epoch {epoch}.")
             model.unfreeze_backbone()
-            # rebuild optimizer to include unfrozen params
-            optimizer = optim.AdamW(
-                filter(lambda p: p.requires_grad, model.parameters()),
-                lr=scfg.LR * 0.1,  # lower LR for backbone fine-tuning
-                weight_decay=scfg.WEIGHT_DECAY,
-            )
+            # Differential LRs: backbone at LR×0.1, head/decoder stays at LR
+            groups = _make_param_groups(model, backbone_lr=scfg.LR * 0.1, head_lr=scfg.LR)
+            optimizer = optim.AdamW(groups, weight_decay=scfg.WEIGHT_DECAY)
             if scfg.USE_COSINE_LR:
                 scheduler = CosineAnnealingLR(
-                    optimizer, T_max=cfg.EPOCHS - epoch, eta_min=scfg.LR * 0.001
+                    optimizer, T_max=cfg.EPOCHS - epoch, eta_min=0.0
                 )
 
         t0 = time.time()
@@ -311,7 +324,7 @@ def main():
             scfg.CROP_SIZE, scfg.TILE_STRIDE, cfg.NORMALIZATION, cfg.EVAL_THRESHOLD,
         )
         scheduler.step()
-        lr = optimizer.param_groups[0]["lr"]
+        lr = optimizer.param_groups[-1]["lr"]  # head LR (last group)
 
         print(
             f"[{epoch:4d}/{cfg.EPOCHS}]  "

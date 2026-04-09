@@ -23,7 +23,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
 from torch.utils.data import DataLoader
 
 from configs import config as cfg
@@ -142,6 +142,7 @@ def train_epoch(model, loader, criterion, optimizer, device, grad_accum_steps=1)
         loss_sum += loss.item() * grad_accum_steps
         iou_sum  += batch_iou(logits.detach(), masks).item()
         if (step + 1) % grad_accum_steps == 0 or (step + 1) == len(loader):
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             optimizer.zero_grad()
     n = max(len(loader), 1)
@@ -225,7 +226,7 @@ def val_epoch_tiled(model, val_stems, data_dir, criterion, device,
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    run_name  = f"vit__bs{vcfg.BATCH_SIZE}__lrdec{vcfg.LR_DECODER}"
+    run_name  = f"vit__bs{vcfg.BATCH_SIZE}__lrdec{vcfg.LR_DECODER}__wd{vcfg.WEIGHT_DECAY}"
     run_dir   = cfg.OUTPUT_DIR / run_name
     log_dir   = run_dir / "logs"
     ckpt_dir  = run_dir / "checkpoints"
@@ -326,6 +327,8 @@ def main():
          "weight_decay": vcfg.WEIGHT_DECAY},
     ])
     scheduler = StepLR(optimizer, step_size=cfg.LR_DECAY_STEP, gamma=cfg.LR_DECAY_RATE)
+    if getattr(vcfg, "USE_COSINE_LR", False):
+        scheduler = CosineAnnealingLR(optimizer, T_max=cfg.EPOCHS, eta_min=0.0)
 
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "train.jsonl"
